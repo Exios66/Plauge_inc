@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Plague Inc. Stylized World Globe</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Interactive 3D globe visualization inspired by Plague Inc.">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <style>
+    :root {
+      --background-color: #111;
+      --control-bg: #222;
+      --text-color: #eee;
+      --slider-color: #ff4444;
+      --accent-color: #ff4444;
+      --tooltip-bg: rgba(0, 0, 0, 0.8);
+    }
+    
+    * {
+      margin: 0; 
+      padding: 0; 
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--background-color);
+      color: var(--text-color);
+      display: flex; 
+      flex-direction: column;
+      min-height: 100vh;
+      overflow: hidden;
+    }
+    
+    #container {
+      position: relative;
+      width: 100%;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    #globeCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+      cursor: grab;
+    }
+
+    #globeCanvas:active {
+      cursor: grabbing;
+    }
+    
+    #controls {
+      width: 100%;
+      padding: 1rem;
+      background: var(--control-bg);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      justify-content: center;
+      box-shadow: 0 -2px 10px rgba(0,0,0,0.3);
+      transition: transform 0.3s ease;
+    }
+
+    #controls.hidden {
+      transform: translateY(100%);
+    }
+    
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      min-width: 150px;
+      max-width: 250px;
+    }
+    
+    .control-group label {
+      margin-bottom: 0.5rem;
+      font-size: 0.9rem;
+      font-weight: 500;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .value-display {
+      font-size: 0.8rem;
+      opacity: 0.8;
+    }
+    
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 6px;
+      background: #444;
+      border-radius: 3px;
+      outline: none;
+    }
+    
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      background: var(--slider-color);
+      border-radius: 50%;
+      cursor: pointer;
+      transition: transform 0.1s;
+    }
+    
+    input[type="range"]::-moz-range-thumb {
+      width: 16px;
+      height: 16px;
+      background: var(--slider-color);
+      border-radius: 50%;
+      cursor: pointer;
+      transition: transform 0.1s;
+      border: none;
+    }
+    
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.1);
+    }
+
+    #loading {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: var(--background-color);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      transition: opacity 0.5s;
+    }
+
+    #loading.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .loader {
+      width: 48px;
+      height: 48px;
+      border: 5px solid var(--accent-color);
+      border-bottom-color: transparent;
+      border-radius: 50%;
+      animation: rotation 1s linear infinite;
+    }
+
+    #stats {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      background: var(--tooltip-bg);
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      opacity: 0.8;
+      pointer-events: none;
+    }
+
+    #toggleControls {
+      position: absolute;
+      bottom: 100%;
+      right: 1rem;
+      background: var(--control-bg);
+      border: none;
+      color: var(--text-color);
+      padding: 0.5rem;
+      border-radius: 4px 4px 0 0;
+      cursor: pointer;
+      opacity: 0.8;
+      transition: opacity 0.2s;
+    }
+
+    #toggleControls:hover {
+      opacity: 1;
+    }
+
+    @keyframes rotation {
+      0% { transform: rotate(0deg) }
+      100% { transform: rotate(360deg) }
+    }
+    
+    @media (max-width: 600px) {
+      .control-group {
+        min-width: 120px;
+        max-width: 160px;
+      }
+      
+      #controls {
+        padding: 0.75rem;
+        gap: 0.75rem;
+      }
+
+      #stats {
+        font-size: 0.8rem;
+        padding: 0.25rem 0.5rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <div class="loader"></div>
+  </div>
+
+  <div id="container">
+    <canvas id="globeCanvas"></canvas>
+    <div id="stats">
+      Infected: <span id="infectedCount">0</span>%<br>
+      FPS: <span id="fpsCounter">0</span>
+    </div>
+  </div>
+
+  <div id="controls">
+    <button id="toggleControls" aria-label="Toggle Controls">▼</button>
+    <div class="control-group">
+      <label for="intensitySlider">
+        Infection Intensity
+        <span class="value-display" id="intensityValue">50%</span>
+      </label>
+      <input id="intensitySlider" type="range" min="0" max="1" step="0.01" value="0.5">
+    </div>
+    <div class="control-group">
+      <label for="spreadSlider">
+        Spread Distribution
+        <span class="value-display" id="spreadValue">50%</span>
+      </label>
+      <input id="spreadSlider" type="range" min="0" max="1" step="0.01" value="0.5">
+    </div>
+    <div class="control-group">
+      <label for="colorSlider">
+        Color Range
+        <span class="value-display" id="colorValue">50%</span>
+      </label>
+      <input id="colorSlider" type="range" min="0" max="1" step="0.01" value="0.5">
+    </div>
+    <div class="control-group">
+      <label for="rotationSlider">
+        Rotation Speed
+        <span class="value-display" id="rotationValue">50%</span>
+      </label>
+      <input id="rotationSlider" type="range" min="0" max="1" step="0.01" value="0.5">
+    </div>
+  </div>
+
+  <script type="module">
+    const loadScript = (src) => {
+      return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = src;
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+    };
+
+    class GlobeVisualization {
+      constructor() {
+        this.renderer = null;
+        this.scene = null;
+        this.camera = null;
+        this.globeMesh = null;
+        this.infectionGroup = null;
+        this.pointMeshes = [];
+        this.controls = {
+          intensity: document.getElementById('intensitySlider'),
+          spread: document.getElementById('spreadSlider'),
+          color: document.getElementById('colorSlider'),
+          rotation: document.getElementById('rotationSlider')
+        };
+        this.valueDisplays = {
+          intensity: document.getElementById('intensityValue'),
+          spread: document.getElementById('spreadValue'),
+          color: document.getElementById('colorValue'),
+          rotation: document.getElementById('rotationValue')
+        };
+        this.stats = {
+          infected: document.getElementById('infectedCount'),
+          fps: document.getElementById('fpsCounter')
+        };
+        this.isAnimating = true;
+        this.lastTime = 0;
+        this.frameCount = 0;
+        this.lastFpsUpdate = 0;
+        this.isDragging = false;
+        this.rotationSpeed = 0.0008;
+        
+        // Initialize control panel state
+        this.controlsVisible = true;
+        this.setupControlPanel();
+      }
+
+      async initialize() {
+        const loading = document.getElementById('loading');
+        try {
+          await loadScript('https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js');
+          await this.setupScene();
+          await this.setupLighting();
+          await this.createGlobe();
+          this.setupInfections();
+          this.setupEventListeners();
+          this.animate();
+          loading.classList.add('hidden');
+        } catch (error) {
+          console.error('Failed to initialize:', error);
+          loading.innerHTML = 'Failed to load visualization. Please refresh.';
+        }
+      }
+
+      setupControlPanel() {
+        const controls = document.getElementById('controls');
+        const toggleBtn = document.getElementById('toggleControls');
+        
+        toggleBtn.addEventListener('click', () => {
+          this.controlsVisible = !this.controlsVisible;
+          controls.classList.toggle('hidden');
+          toggleBtn.textContent = this.controlsVisible ? '▼' : '▲';
+        });
+
+        // Update value displays
+        Object.entries(this.controls).forEach(([key, control]) => {
+          const updateValue = () => {
+            const percent = Math.round(control.value * 100);
+            this.valueDisplays[key].textContent = `${percent}%`;
+          };
+          control.addEventListener('input', updateValue);
+          updateValue();
+        });
+      }
+
+      async setupScene() {
+        this.scene = new THREE.Scene();
+        this.scene.background = new THREE.Color(0x000000);
+
+        const canvas = document.getElementById('globeCanvas');
+        this.renderer = new THREE.WebGLRenderer({
+          canvas,
+          antialias: true,
+          powerPreference: 'high-performance'
+        });
+        
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+
+        this.camera = new THREE.PerspectiveCamera(
+          45,
+          window.innerWidth / window.innerHeight,
+          0.1,
+          1000
+        );
+        this.camera.position.z = 3;
+      }
+
+      setupLighting() {
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        this.scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(5, 3, 5);
+        this.scene.add(directionalLight);
+
+        // Add subtle rim light
+        const backLight = new THREE.DirectionalLight(0x444444, 0.5);
+        backLight.position.set(-5, -3, -5);
+        this.scene.add(backLight);
+      }
+
+      async createGlobe() {
+        return new Promise((resolve) => {
+          const geometry = new THREE.SphereGeometry(1, 64, 64);
+          const textureLoader = new THREE.TextureLoader();
+          
+          // Load textures
+          const diffuseMap = textureLoader.load(
+            'https://raw.githubusercontent.com/hissaot/dummy-assets/main/earthmap4k.jpg',
+            () => {
+              const material = new THREE.MeshPhongMaterial({
+                map: diffuseMap,
+                bumpScale: 0.05,
+                specular: new THREE.Color(0x333333),
+                shininess: 5
+              });
+              
+              this.globeMesh = new THREE.Mesh(geometry, material);
+              this.scene.add(this.globeMesh);
+              resolve();
+            }
+          );
+        });
+      }
+
+      setupInfections() {
+        this.infectionGroup = new THREE.Group();
+        this.scene.add(this.infectionGroup);
+        this.generateInfectionPoints(300); // Increased number of points
+      }
+
+      generateInfectionPoints(count) {
+        const geometry = new THREE.SphereGeometry(0.01, 8, 8);
+        const material = new THREE.MeshPhongMaterial({
+          color: 0xff0000,
+          emissive: 0xff0000,
+          emissiveIntensity: 0.5,
+          transparent: true,
+          opacity: 0.8
+        });
+
+        for (let i = 0; i < count; i++) {
+          const phi = Math.random() * Math.PI * 2;
+          const costheta = Math.random() * 2 - 1;
+          const theta = Math.acos(costheta);
+
+          const mesh = new THREE.Mesh(geometry, material.clone());
+          mesh.userData.spherical = { 
+            phi, 
+            theta,
+            originalPhi: phi,
+            originalTheta: theta,
+            phase: Math.random() * Math.PI * 2
+          };
+          
+          this.pointMeshes.push(mesh);
+          this.infectionGroup.add(mesh);
+        }
+
+        this.updateInfectionPositions();
+        this.updateInfectionAppearance();
+      }
+
+      updateInfectionPositions() {
+        const spread = parseFloat(this.controls.spread.value);
+        const time = performance.now() * 0.001;
+        
+        this.pointMeshes.forEach(mesh => {
+          const { originalPhi, originalTheta, phase } = mesh.userData.spherical;
+          
+          // Add subtle wave motion
+          const waveOffset = Math.sin(time + phase) * 0.02;
+          const radius = 1.02 + (spread * 0.1) + waveOffset;
+          
+          // Calculate position with slight deviation from original position
+          const deviation = spread * 0.2;
+          const phi = originalPhi + Math.sin(time + phase) * deviation;
+          const theta = originalTheta + Math.cos(time + phase) * deviation;
+          
+          mesh.position.setFromSpherical(
+            new THREE.Spherical(radius, theta, phi)
+          );
+        });
+      }
+
+      updateInfectionAppearance() {
+        const intensity = parseFloat(this.controls.intensity.value);
+        const colorParam = parseFloat(this.controls.color.value);
+        
+        // Calculate infection percentage
+        const activePoints = this.pointMeshes.filter(mesh => 
+          mesh.material.opacity > 0.2
+        ).length;
+        const infectionPercent = Math.round((activePoints / this.pointMeshes.length) * 100);
+        this.stats.infected.textContent = infectionPercent;
+
+        this.pointMeshes.forEach((mesh, index) => {
+          const hue = 0.33 - (0.33 * colorParam);
+          const color = new THREE.Color().setHSL(hue, 1, 0.5 * intensity + 0.25);
+          
+          // Add pulsing effect
+          const time = performance.now() * 0.001;
+          const pulse = Math.sin(time + index) * 0.2 + 0.8;
+          
+          mesh.material.color.copy(color);
+          mesh.material.emissive.copy(color);
+          mesh.material.emissiveIntensity = intensity * 0.8 * pulse;
+          mesh.material.opacity = intensity * 0.8;
+        });
+      }
+
+      setupEventListeners() {
+        window.addEventListener('resize', this.onWindowResize.bind(this));
+        
+        Object.values(this.controls).forEach(control => {
+          control.addEventListener('input', () => {
+            this.updateInfectionPositions();
+            this.updateInfectionAppearance();
+            if (control === this.controls.rotation) {
+              this.rotationSpeed = 0.002 * control.value;
+            }
+          });
+        });
+
+        // Add touch and mouse rotation
+        let previousMousePosition = { x: 0, y: 0 };
+
+        const startDrag = (e) => {
+          this.isDragging = true;
+          const clientX = e.clientX ?? e.touches[0].clientX;
+          const clientY = e.clientY ?? e.touches[0].clientY;
+          previousMousePosition = { x: clientX, y: clientY };
+        };
+
+        const endDrag = () => {
+          this.isDragging = false;
+        };
+
+        const drag = (e) => {
+          if (!this.isDragging) return;
+          
+          const clientX = e.clientX ?? e.touches[0].clientX;
+          const clientY = e.clientY ?? e.touches[0].clientY;
+          
+          const deltaMove = {
+            x: clientX - previousMousePosition.x,
+            y: clientY - previousMousePosition.y
+          };
+
+          const rotationSpeed = 0.005;
+          this.globeMesh.rotation.y += deltaMove.x * rotationSpeed;
+          this.infectionGroup.rotation.y += deltaMove.x * rotationSpeed;
+          
+          // Add vertical rotation within limits
+          const newRotationX = this.globeMesh.rotation.x + (deltaMove.y * rotationSpeed);
+          const rotationLimit = Math.PI / 4;
+          if (Math.abs(newRotationX) < rotationLimit) {
+            this.globeMesh.rotation.x = newRotationX;
+            this.infectionGroup.rotation.x = newRotationX;
+          }
+
+          previousMousePosition = { x: clientX, y: clientY };
+        };
+
+        const canvas = this.renderer.domElement;
+        canvas.addEventListener('mousedown', startDrag);
+        canvas.addEventListener('touchstart', startDrag);
+        window.addEventListener('mouseup', endDrag);
+        window.addEventListener('touchend', endDrag);
+        window.addEventListener('mousemove', drag);
+        window.addEventListener('touchmove', drag);
+      }
+
+      onWindowResize() {
+        this.camera.aspect = window.innerWidth / window.innerHeight;
+        this.camera.updateProjectionMatrix();
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      updateFPS(currentTime) {
+        this.frameCount++;
+        
+        const elapsed = currentTime - this.lastFpsUpdate;
+        if (elapsed >= 1000) { // Update every second
+          const fps = Math.round((this.frameCount * 1000) / elapsed);
+          this.stats.fps.textContent = fps;
+          
+          this.frameCount = 0;
+          this.lastFpsUpdate = currentTime;
+        }
+      }
+
+      animate(currentTime = 0) {
+        if (!this.isAnimating) return;
+        
+        requestAnimationFrame(this.animate.bind(this));
+
+        const deltaTime = currentTime - this.lastTime;
+        this.lastTime = currentTime;
+
+        // Update FPS counter
+        this.updateFPS(currentTime);
+
+        // Auto-rotation when not dragging
+        if (!this.isDragging) {
+          this.globeMesh.rotation.y += this.rotationSpeed;
+          this.infectionGroup.rotation.y += this.rotationSpeed;
+        }
+
+        // Update infection positions and appearance
+        this.updateInfectionPositions();
+        this.updateInfectionAppearance();
+
+        this.renderer.render(this.scene, this.camera);
+      }
+    }
+
+    const globe = new GlobeVisualization();
+    globe.initialize();
+  </script>
+</body>
+</html>
